@@ -1,0 +1,63 @@
+{
+  "name": "@xiujin/oss-uploader",
+  "version": "0.1.0",
+  "description": "Framework-independent browser OSS form upload factory with project-provided signing and result callbacks",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zlcGitHub/aliyun-oss-uploader.git"
+  },
+  "bugs": {
+    "url": "https://github.com/zlcGitHub/aliyun-oss-uploader/issues"
+  },
+  "homepage": "https://github.com/zlcGitHub/aliyun-oss-uploader#readme",
+  "keywords": [
+    "oss",
+    "aliyun",
+    "upload",
+    "browser",
+    "typescript"
+  ],
+  "packageManager": "pnpm@10.33.0",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "scripts": {
+    "build": "tsup src/index.ts --format esm,cjs --dts --clean --target es2022",
+    "type-check": "tsc --noEmit",
+    "test": "vitest run",
+    "check:package": "node scripts/check-package.mjs",
+    "check": "pnpm type-check && pnpm test && pnpm check:package",
+    "prepack": "pnpm build",
+    "prepublishOnly": "node scripts/check-publish.mjs && pnpm check"
+  },
+  "devDependencies": {
+    "tsup": "8.5.0",
+    "typescript": "5.9.3",
+    "vitest": "4.0.18"
+  }
+}
