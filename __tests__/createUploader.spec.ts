@@ -1,6 +1,6 @@
 import { createUploader } from '../src/index'
 import type { TUploadTarget } from '../src/index'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const createFile = () => new File(['image'], 'photo.png', { type: 'image/png' })
 let fetchMock = vi.fn()
@@ -8,6 +8,7 @@ beforeEach(() => {
   fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 204 })
   vi.stubGlobal('fetch', fetchMock)
 })
+afterEach(() => vi.useRealTimers())
 
 const setup = (
   target: TUploadTarget = { host: 'https://bucket.example.com', formData: { key: 'photo.png' } },
@@ -25,9 +26,9 @@ describe('通用 OSS 表单上传', () => {
     const { upload, signature, getSignature, getUploadTarget, getResult } = setup()
     const file = createFile()
     await expect(upload(file)).resolves.toEqual({ location: 'https://cdn.example.com/photo.png' })
-    expect(getSignature).toHaveBeenCalledWith(file)
+    expect(getSignature).toHaveBeenCalledWith(file, { signal: undefined })
     expect(getUploadTarget).toHaveBeenCalledWith(signature)
-    expect(getResult).toHaveBeenCalledExactlyOnceWith(signature)
+    expect(getResult).toHaveBeenCalledExactlyOnceWith(signature, { signal: undefined })
     const [host, config] = fetchMock.mock.calls[0]
     expect(host).toBe('https://bucket.example.com')
     expect(config).toMatchObject({ method: 'POST', credentials: 'omit' })
@@ -114,23 +115,35 @@ describe('通用 OSS 表单上传', () => {
 
   it.each([null, 'photo.png', new Blob(['image'])])('非 File 输入不申请签名：%s', async (input) => {
     const { upload, getSignature } = setup()
-    await expect(upload(input as unknown as File)).rejects.toThrow('Upload file is empty or invalid')
+    await expect(upload(input as unknown as File)).rejects.toThrow(
+      'Upload file is empty or invalid',
+    )
     expect(getSignature).not.toHaveBeenCalled()
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
   it('上传超时后直接失败，不查询结果或重新上传', async () => {
-    const controller = new AbortController()
-    controller.abort(new DOMException('Upload timed out', 'TimeoutError'))
-    const timeout = vi.spyOn(AbortSignal, 'timeout').mockReturnValue(controller.signal)
-    fetchMock.mockImplementation(async (_host, { signal }: RequestInit) => {
-      signal?.throwIfAborted()
+    vi.useFakeTimers()
+    let started!: () => void
+    const uploadStarted = new Promise<void>((resolve) => {
+      started = resolve
+    })
+    fetchMock.mockImplementation(() => {
+      started()
+      return new Promise(() => {})
     })
     const { upload, getResult } = setup()
-    await expect(upload(createFile())).rejects.toThrow('Upload timed out')
-    expect(timeout).toHaveBeenCalledExactlyOnceWith(600000)
+    const task = upload(createFile())
+    const rejected = expect(task).rejects.toMatchObject({ code: 'TIMEOUT', stage: 'upload' })
+    await uploadStarted
+    await vi.advanceTimersByTimeAsync(599999)
+    expect(fetchMock.mock.calls[0][1].signal.aborted).toBe(false)
+    await vi.advanceTimersByTimeAsync(1)
+    await rejected
+    expect(fetchMock.mock.calls[0][1].signal.aborted).toBe(true)
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(getResult).not.toHaveBeenCalled()
+    expect(vi.getTimerCount()).toBe(0)
   })
 
   it('并发上传的签名和结果保持各自关联，允许后发请求先完成', async () => {
@@ -141,7 +154,9 @@ describe('通用 OSS 表单上传', () => {
     const upload = createUploader({
       getSignature: (file: File) =>
         file.name === 'first.png'
-          ? new Promise<{ key: string }>((resolve) => { finishFirst = resolve })
+          ? new Promise<{ key: string }>((resolve) => {
+              finishFirst = resolve
+            })
           : Promise.resolve({ key: file.name }),
       getUploadTarget: ({ key }) => ({ host: 'https://bucket.example.com', formData: { key } }),
       getResult,
@@ -150,8 +165,13 @@ describe('通用 OSS 表单上传', () => {
     await expect(upload(new File(['second'], 'second.png'))).resolves.toEqual({ key: 'second.png' })
     finishFirst({ key: 'first.png' })
     await expect(first).resolves.toEqual({ key: 'first.png' })
-    expect(getResult.mock.calls.map(([signature]) => signature.key)).toEqual(['second.png', 'first.png'])
-    expect(fetchMock.mock.calls.map(([, options]) => (options.body as FormData).get('key'))).toEqual(['second.png', 'first.png'])
+    expect(getResult.mock.calls.map(([signature]) => signature.key)).toEqual([
+      'second.png',
+      'first.png',
+    ])
+    expect(
+      fetchMock.mock.calls.map(([, options]) => (options.body as FormData).get('key')),
+    ).toEqual(['second.png', 'first.png'])
   })
 
   it('签名申请失败时不上传和查询结果', async () => {
@@ -170,7 +190,7 @@ describe('通用 OSS 表单上传', () => {
     expect(getResult).not.toHaveBeenCalled()
   })
 
-  it('OSS 网络错误直接透传且不查询结果', async () => {
+  it('OSS 网络错误保留原始消息且不查询结果', async () => {
     fetchMock.mockRejectedValue(new Error('Network failed'))
     const { upload, getResult } = setup()
     await expect(upload(createFile())).rejects.toThrow('Network failed')

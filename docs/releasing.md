@@ -1,18 +1,28 @@
-# 发布与业务项目迁移
+# 发布与版本维护
 
-## 当前状态
+## 发布配置
 
-- 版本：`0.1.0`。
-- 包名：`@xiujin/oss-uploader`，归属 npm 组织 `xiujin`。
-- npm Registry：`https://registry.npmjs.org/`。
-- 公开发布；如需私有发布，应先调整发布配置及账号权限。
-- `prepublishOnly` 会阻止占位包名发布；CI 不登录 npm，也不发布。
+- npm 包名：`@xiujin/oss-uploader`，归属组织 `xiujin`。
+- Registry：`https://registry.npmjs.org/`。
+- 可见性：`public`，任何项目均可从 npm 安装。
+- CI 执行检查；正式发布由有包发布权限的维护者手动执行。
 
-## 首次发布
+## 准备版本
 
-1. 本库和 Seller 已配置正式包名 `@xiujin/oss-uploader`，`publishConfig.access` 为 `public`，registry 指向 npmjs.com，无需创建新的 scope 或修改 registry 来表示组织。
-2. 执行 `pnpm check` 和 `npm pack --dry-run` 检查代码及发布内容；预期只有 `dist/`、README、LICENSE 和 package.json。
-3. 使用有 `xiujin` 组织发布权限的个人 npm 账号登录，确认身份后发布：
+根据变更选择 patch、minor 或 major。`0.x` 阶段的不兼容变更应升级 minor，并明确说明迁移方式。
+
+```bash
+# 示例：递增修复版本，不自动创建 Git 提交或 tag。
+npm version patch --no-git-tag-version
+pnpm check
+npm pack --dry-run
+```
+
+`pnpm check` 验证类型、上传行为、构建产物及实际压缩包安装。发布内容应只有 `dist/`、README、LICENSE 和 package.json。
+
+## 手动发布
+
+使用有该包发布权限的个人 npm 账号登录：
 
 ```bash
 npm login --registry=https://registry.npmjs.org/
@@ -20,45 +30,35 @@ npm whoami --registry=https://registry.npmjs.org/
 npm publish --access public --registry=https://registry.npmjs.org/
 ```
 
-按 npm 提示完成浏览器登录和发布验证。不要将账号 token 写入源码或提交到仓库。`npm publish` 会自动执行完整检查并构建。
+`npm whoami` 返回个人用户名，组织归属由包名中的 `@xiujin/` 前缀决定。账号应具备对应组织和包的发布权限，并按 npm 提示完成发布所需的 2FA 验证。
 
-`npm whoami` 返回个人用户名，不必是 `xiujin`；组织归属由包名的 `@xiujin/` 前缀决定。如果提示没有发布权限，应由组织管理员检查当前账号的组织角色及包发布权限。
+`npm publish` 会自动执行检查与构建。npm 不允许覆盖已发布的同名同版本，因此每次发布都必须使用新版本号。
 
-发布成功后核对版本及安装结果：
+## 确认发布结果
 
-```bash
-npm view @xiujin/oss-uploader@0.1.0 version --registry=https://registry.npmjs.org/
-```
-
-在源码提交与发布产物对应后创建 `v0.1.0` tag；Git 提交、推送和 tag 由实际发布操作一并处理。
-
-## 发布前 Seller 如何接入
-
-Seller 暂时使用自身仓库内的 `vendor/xiujin-oss-uploader-0.1.0.tgz`，依赖形式为：
-
-```json
-{
-  "@xiujin/oss-uploader": "file:vendor/xiujin-oss-uploader-0.1.0.tgz"
-}
-```
-
-这是可随 Seller 仓库迁移的实际 npm 压缩包，不依赖本机相邻目录或 symlink。Seller 的 `uploadToOss` 导出及调用方保持原接口，内部工厂从包入口导入。工厂源码和通用测试已迁移到独立库；Seller 保留业务适配和组件回归测试。
-
-正式发布后，在 Seller 中执行：
+发布后确认正式版本和 `latest` 标签：
 
 ```bash
-pnpm add @xiujin/oss-uploader@0.1.0 --registry=https://registry.npmjs.org/
+npm view @xiujin/oss-uploader version dist-tags --registry=https://registry.npmjs.org/
 ```
 
-适配层已经使用正式包名，无需再改导入。依赖切换成功后，删除 `vendor/xiujin-oss-uploader-0.1.0.tgz` 和临时接入说明，提交 package.json、锁文件和对应源码。运行上传回归测试、类型检查和目标环境构建，并在实际浏览器环境上传文件验证后端链路。
+若 npm 返回正在处理的提示，等待处理完成后再确认 Registry 中的版本。若使用 `npm stage publish` 提交了暂存版本，则需完成对应暂存记录的审批。命令退出成功不等于新版本已经对外可安装。
 
-## 发布前刷新本地包
+在独立临时项目中从 npm 安装新版本，验证公开入口、类型声明和实际使用场景。完成验证后，将对应源码提交与版本 tag 对齐。
 
-修改工厂后先递增版本（可使用 `0.1.1-local.0` 等预发布版本），在库仓库执行 `pnpm check`、`npm pack`。将新压缩包复制到 Seller 的 vendor 目录，使用包含新版本的文件名，然后执行 `pnpm add @xiujin/oss-uploader@file:vendor/新文件名.tgz` 更新依赖和锁文件。删除不再引用的旧压缩包，再运行 Seller 检查。不要覆盖同路径、同版本的压缩包，以免命中旧缓存或保留旧校验值。
+## 业务项目升级
 
-## 后续版本
+接入项目从 npm 安装插件，并通过三个回调适配自身的签名、上传目标和结果查询接口。业务鉴权、接口响应解包、文件命名约定、UI 状态及错误提示由接入项目维护。
 
-- 修复使用 patch，增加兼容能力使用 minor，不兼容接口变更使用 major；`0.x` 阶段需在变更说明中明确兼容性。
-- npm 上同名同版本不能覆盖；发布前先更新版本并记录变更。
-- 每次执行 `pnpm check`、检查包内容、更新业务项目并运行其回归验证。
-- 库包不携带 Seller API、项目名、登录态、OSS 配置或长期密钥。
+```bash
+# 将 0.1.0 替换为目标版本。
+pnpm add @xiujin/oss-uploader@0.1.0 --save-exact --registry=https://registry.npmjs.org/
+```
+
+升级时同步提交依赖声明和锁文件，运行项目的上传回归、类型检查及构建，并验证实际上传链路。插件自身的通用行为测试保留在本仓库维护。
+
+## 发布前联调
+
+需要在正式发布前验证接入时，可使用独立的预发布版本或通过 `npm pack` 生成本地压缩包。使用压缩包时，每次变更应递增版本并生成不同文件名，避免命中同路径、同版本的旧缓存。
+
+本地联调依赖只用于验证；正式接入使用 npm 发布版本。插件保持通用上传协议，业务接口、项目凭证和组件实现由各接入方提供。

@@ -1,6 +1,6 @@
 {
   "name": "@xiujin/oss-uploader",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Framework-independent browser OSS form upload factory with project-provided signing and result callbacks",
   "license": "MIT",
   "type": "module",
